@@ -155,8 +155,9 @@ Resources:
     Properties:
 
       VPCZoneIdentifier:
-        - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV1-SN"
-        - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV2-SN"
+        Fn::Split:
+          - ","
+          - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV-NETS"
 
       LaunchTemplate:
         LaunchTemplateId: !Ref WebAppLaunchTemplate
