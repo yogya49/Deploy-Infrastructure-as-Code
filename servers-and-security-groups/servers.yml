@@ -1,25 +1,29 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-Description:
-  Udagram Servers Stack
+Description: Udagram Infrastructure
 
 Parameters:
 
   EnvironmentName:
-    Description: An environment name that will be prefixed to resource names
+    Description: Name of the environment
     Type: String
+    Default: Udagram
+
 
 Resources:
 
+  # ---------------------------------
   # LOAD BALANCER SECURITY GROUP
+  # ---------------------------------
+
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow http access to our load balancer
+
+      GroupDescription: Allow HTTP from Internet
 
       VpcId:
-        Fn::ImportValue:
-          !Sub "${EnvironmentName}-VPCID"
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
 
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -28,15 +32,18 @@ Resources:
           CidrIp: 0.0.0.0/0
 
 
+  # ---------------------------------
   # WEB SERVER SECURITY GROUP
+  # ---------------------------------
+
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow http access to our hosts from the LB Security Group
+
+      GroupDescription: Allow HTTP from Load Balancer
 
       VpcId:
-        Fn::ImportValue:
-          !Sub "${EnvironmentName}-VPCID"
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
 
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -45,65 +52,19 @@ Resources:
           SourceSecurityGroupId: !Ref LBSecGroup
 
       SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 0
-          ToPort: 65535
+        - IpProtocol: -1
           CidrIp: 0.0.0.0/0
 
 
-  # IAM ROLE
-  WebAppInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-
-      RoleName: !Sub "${EnvironmentName}-web-servers"
-
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-
-        Statement:
-          - Effect: Allow
-
-            Principal:
-              Service:
-                - ec2.amazonaws.com
-
-            Action:
-              - sts:AssumeRole
-
-      Policies:
-        - PolicyName: s3
-
-          PolicyDocument:
-            Version: '2012-10-17'
-
-            Statement:
-              - Effect: Allow
-
-                Action:
-                  - s3:GetObject
-
-                Resource:
-                  - !Sub "arn:aws:s3:::any-bucket-name/*"
-
-
-  # INSTANCE PROFILE
-  WebAppInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-
-      Path: "/"
-
-      Roles:
-        - !Ref WebAppInstanceRole
-
-
+  # ---------------------------------
   # LAUNCH TEMPLATE
+  # ---------------------------------
+
   WebAppLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
 
-      LaunchTemplateName: !Sub "${EnvironmentName}-web-servers"
+      LaunchTemplateName: !Sub "${EnvironmentName}-lt"
 
       LaunchTemplateData:
 
@@ -114,48 +75,42 @@ Resources:
         SecurityGroupIds:
           - !Ref WebServerSecGroup
 
-        IamInstanceProfile:
-          Name: !Ref WebAppInstanceProfile
-
-        BlockDeviceMappings:
-          - DeviceName: "/dev/xvda"
-            Ebs:
-              VolumeSize: 10
-
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            apt-get update -y
-            apt-get install nginx -y
-            systemctl start nginx
-            systemctl enable nginx
+            yum update -y
+            yum install httpd -y
+            systemctl start httpd
+            systemctl enable httpd
+            echo "Udagram Project Working!" > /var/www/html/index.html
 
-            echo "Udagram App Running" > /var/www/html/index.nginx-debian.html
 
-
+  # ---------------------------------
   # TARGET GROUP
+  # ---------------------------------
+
   WebAppTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
 
       Port: 80
+
       Protocol: HTTP
 
       VpcId:
-        Fn::ImportValue:
-          Fn::Sub: "${EnvironmentName}-VPCID"
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
 
       HealthCheckPath: /
+
       HealthCheckProtocol: HTTP
-      HealthCheckIntervalSeconds: 10
-      HealthCheckTimeoutSeconds: 8
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 5
 
       TargetType: instance
 
 
+  # ---------------------------------
   # LOAD BALANCER
+  # ---------------------------------
+
   WebAppLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -172,7 +127,10 @@ Resources:
         - !Ref LBSecGroup
 
 
+  # ---------------------------------
   # LISTENER
+  # ---------------------------------
+
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -188,26 +146,10 @@ Resources:
           TargetGroupArn: !Ref WebAppTargetGroup
 
 
-  # LISTENER RULE
-  ALBListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-
-      ListenerArn: !Ref Listener
-
-      Priority: 1
-
-      Conditions:
-        - Field: path-pattern
-          Values:
-            - /
-
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref WebAppTargetGroup
-
-
+  # ---------------------------------
   # AUTO SCALING GROUP
+  # ---------------------------------
+
   WebAppGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -220,9 +162,11 @@ Resources:
         LaunchTemplateId: !Ref WebAppLaunchTemplate
         Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
 
-      MinSize: '1'
-      MaxSize: '3'
-      DesiredCapacity: '1'
+      MinSize: "1"
+
+      MaxSize: "2"
+
+      DesiredCapacity: "1"
 
       TargetGroupARNs:
         - !Ref WebAppTargetGroup
